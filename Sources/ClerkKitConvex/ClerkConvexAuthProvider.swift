@@ -40,6 +40,10 @@ public final class ClerkConvexAuthProvider: AuthProvider {
   /// Weak reference to the Convex client for session sync.
   private weak var client: ConvexClientWithAuth<String>?
 
+  private let tokenTemplate = "convex"
+
+  private var isForwardingTokenRefresh = false
+
   /// Creates a new ClerkConvexAuthProvider.
   public init() {}
 
@@ -130,7 +134,7 @@ public final class ClerkConvexAuthProvider: AuthProvider {
       throw ClerkConvexAuthError.noActiveSession
     }
 
-    guard let token = try await session.getToken() else {
+    guard let token = try await session.getToken(Session.GetTokenOptions(template: self.tokenTemplate)) else {
       throw ClerkConvexAuthError.tokenRetrievalFailed("Token returned nil")
     }
 
@@ -152,8 +156,8 @@ public final class ClerkConvexAuthProvider: AuthProvider {
         guard !Task.isCancelled else { break }
 
         switch event {
-        case .tokenRefreshed(let token):
-          onIdToken?(token)
+        case .tokenRefreshed:
+          await self.forwardCurrentToken()
         default:
           break
         }
@@ -206,5 +210,22 @@ public final class ClerkConvexAuthProvider: AuthProvider {
   /// Returns true when we should clear Convex auth due to session removal.
   private func shouldLogout(oldSession: Session?, newSession: Session?) -> Bool {
     oldSession?.id != nil && newSession == nil
+  }
+
+  private func forwardCurrentToken() async {
+    guard !isForwardingTokenRefresh else {
+      return
+    }
+
+    isForwardingTokenRefresh = true
+    defer {
+      isForwardingTokenRefresh = false
+    }
+
+    do {
+      onIdToken?(try await fetchToken())
+    } catch {
+      return
+    }
   }
 }
