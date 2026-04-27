@@ -14,7 +14,7 @@ let package = Package(
   ],
   dependencies: [
     .package(url: "https://github.com/clerk/clerk-ios.git", from: "1.0.0"),
-    .package(url: "https://github.com/get-convex/convex-swift", from: "0.8.0"),
+    .package(url: "https://github.com/blueragesoftware/convex-swift", branch: "ertembiyik/fix-auth-token-refresh-loop"),
   ],
   targets: [
     .target(
