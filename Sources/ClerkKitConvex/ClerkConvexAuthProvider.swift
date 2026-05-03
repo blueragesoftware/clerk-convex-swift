@@ -63,13 +63,16 @@ public final class ClerkConvexAuthProvider: AuthProvider {
   /// - Throws: `ClerkConvexAuthError.noActiveSession` if no user is signed in.
   /// - Throws: `ClerkConvexAuthError.tokenRetrievalFailed` if token retrieval fails.
   public func login(onIdToken: @Sendable @escaping (String?) -> Void) async throws -> String {
-    try await authenticate(onIdToken: onIdToken)
+    try await authenticate(onIdToken: onIdToken) {
+      try await fetchToken()
+    }
   }
 
   /// Retrieves a JWT token from the current Clerk session using cached credentials.
   ///
-  /// This method attempts to return a cached token if available and not expired,
-  /// avoiding unnecessary network requests. It also sets up token refresh listening.
+  /// This method first attempts to return the active session token restored from Clerk's
+  /// persisted client cache. If Clerk did not restore a token with the session, it falls
+  /// back to the normal token path. It also sets up token refresh listening.
   ///
   /// - Parameter onIdToken: Callback to invoke with fresh tokens. Store this and call it
   ///   whenever tokens are refreshed.
@@ -78,7 +81,13 @@ public final class ClerkConvexAuthProvider: AuthProvider {
   /// - Throws: `ClerkConvexAuthError.noActiveSession` if no user is signed in.
   /// - Throws: `ClerkConvexAuthError.tokenRetrievalFailed` if token retrieval fails.
   public func loginFromCache(onIdToken: @Sendable @escaping (String?) -> Void) async throws -> String {
-    try await authenticate(onIdToken: onIdToken)
+    try await authenticate(onIdToken: onIdToken) {
+      if let cachedToken = try fetchCachedToken() {
+        cachedToken
+      } else {
+        try await fetchToken()
+      }
+    }
   }
 
   /// Signs out of the current Clerk session.
@@ -105,10 +114,10 @@ public final class ClerkConvexAuthProvider: AuthProvider {
 
   // MARK: - Private
 
-  /// Common implementation for login and loginFromCache.
-  ///
-  /// Stores the callback, sets up the token refresh listener, and returns the current token.
-  private func authenticate(onIdToken: @Sendable @escaping (String?) -> Void) async throws -> String {
+  private func authenticate(
+    onIdToken: @Sendable @escaping (String?) -> Void,
+    fetchToken: () async throws -> String
+  ) async throws -> String {
     self.onIdToken = onIdToken
     let token = try await fetchToken()
     setupTokenRefreshListener()
@@ -135,6 +144,19 @@ public final class ClerkConvexAuthProvider: AuthProvider {
     }
 
     return token
+  }
+
+  /// Fetches the JWT token from Clerk's cached active session.
+  ///
+  /// Clerk restores its cached client from keychain during configuration. That cached client
+  /// owns the active session and its last active token, so this path avoids making a token
+  /// request while Convex is attempting cached, UI-less authentication.
+  private func fetchCachedToken() throws -> String? {
+    guard let session = Clerk.shared.session, session.status == .active else {
+      throw ClerkConvexAuthError.noActiveSession
+    }
+
+    return session.lastActiveToken?.jwt
   }
 
   /// Sets up a listener for Clerk auth events to handle token refresh.
